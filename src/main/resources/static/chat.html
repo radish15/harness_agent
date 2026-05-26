@@ -366,6 +366,8 @@
                         const reader = response.body.getReader();
                         const decoder = new TextDecoder();
                         let buffer = '';
+                        let hasSeenLastEvent = false;
+                        let eventCount = 0;
 
                         while (true) {
                             const { done, value } = await reader.read();
@@ -376,41 +378,58 @@
                             buffer = lines.pop() || '';
 
                             for (const line of lines) {
-                                if (line.startsWith('data: ')) {
-                                    const data = line.slice(6);
+                                if (!line.trim()) continue;
+                                
+                                if (line.startsWith('data:')) {
+                                    const data = line.slice(5);
                                     if (data === '[DONE]') continue;
 
                                     try {
                                         const event = JSON.parse(data);
                                         const currentMsg = messages.value[assistantMsgIndex];
+                                        eventCount++;
                                         
                                         if (currentMsg) {
                                             // 记录原始事件用于调试
-                                            console.log('收到事件:', event);
+                                            console.log('收到事件 #' + eventCount + ':', event.eventType, 'last:', event.last, 'content length:', (event.content || '').length);
                                             
-                                            // 累积内容（如果存在）
-                                            if (event.content) {
-                                                currentMsg.content += event.content;
+                                            // 跳过重复的 last:true 事件（REASONING 和 AGENT_RESULT 都可能有 last:true）
+                                            if (event.last && hasSeenLastEvent) {
+                                                console.log('跳过重复的 last:true 事件 #' + eventCount);
+                                                continue;
                                             }
-                                            if (event.eventType) {
-                                                currentMsg.eventType = event.eventType;
+                                            if (event.last) {
+                                                hasSeenLastEvent = true;
                                             }
-                                            if (event.messageId) {
-                                                currentMsg.messageId = event.messageId;
-                                            }
-                                            currentMsg.streaming = !event.last;
+                                            
+                                            // 使用响应式方式更新消息
+                                            const updatedContent = (currentMsg.content || '') + (event.content || '');
+                                            const updatedMsg = {
+                                                ...currentMsg,
+                                                content: updatedContent,
+                                                eventType: event.eventType || currentMsg.eventType,
+                                                messageId: event.messageId || currentMsg.messageId,
+                                                streaming: !event.last
+                                            };
+                                            messages.value.splice(assistantMsgIndex, 1, updatedMsg);
                                         }
                                     } catch (e) {
                                         console.error('解析 SSE 数据失败:', e, '原始数据:', data);
                                     }
+                                } else {
+                                    console.log('跳过非data行:', line.substring(0, 100));
                                 }
                             }
                         }
+                        console.log('SSE流结束，共处理' + eventCount + '个事件');
 
-                        // 结束流式传输
+                        // 结束流式传输 - 使用splice确保响应式更新
                         const currentMsg = messages.value[assistantMsgIndex];
                         if (currentMsg) {
-                            currentMsg.streaming = false;
+                            messages.value.splice(assistantMsgIndex, 1, {
+                                ...currentMsg,
+                                streaming: false
+                            });
                         }
 
                     } catch (error) {
