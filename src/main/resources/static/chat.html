@@ -385,8 +385,12 @@
                                         const currentMsg = messages.value[assistantMsgIndex];
                                         
                                         if (currentMsg) {
+                                            // 记录原始事件用于调试
+                                            console.log('收到事件:', event);
+                                            
+                                            // 累积内容（如果存在）
                                             if (event.content) {
-                                                currentMsg.content = event.content;
+                                                currentMsg.content += event.content;
                                             }
                                             if (event.eventType) {
                                                 currentMsg.eventType = event.eventType;
@@ -397,7 +401,7 @@
                                             currentMsg.streaming = !event.last;
                                         }
                                     } catch (e) {
-                                        console.error('解析 SSE 数据失败:', e);
+                                        console.error('解析 SSE 数据失败:', e, '原始数据:', data);
                                     }
                                 }
                             }
